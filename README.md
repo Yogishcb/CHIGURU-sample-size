@@ -1,1 +1,0 @@
-# CHIGURU-sample-size
