@@ -1,0 +1,139 @@
+---
+title: "ctrith_sample"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(here)
+library(rio)
+library(dplyr)
+library(anthro)
+library(gtsummary)
+library(summarytools)
+```
+
+
+
+```{r}
+#| include: false
+
+
+## Importing the dataset 
+
+individuals <- import(here("data","merged_dataset.csv"))
+households <- import(here("data","household.xlsx")) %>%
+  select(village_name,	fulcrum_id_parent,	site, caste_category)
+
+## recoding the variable 
+
+households <- households %>%
+  mutate(caste_cat_st = case_when(
+    caste_category %in% c("obc", "dont_know", "general", "religious converted", "sc", "non_adivasi") ~ "1", # Closing parenthesis here
+    caste_category == "st" ~ "2",
+    is.na(caste_category) ~ "1",
+    TRUE ~ "1"
+  ))
+
+households$caste_cat_st = factor(households$caste_cat_st, labels = c("nonst", "st"))
+
+## Merging individual and household dataset
+
+st_anthro <- left_join(individuals, households, by =c("fulcrum_id_parent"= "fulcrum_id_parent")) 
+
+st_anthro$sex <- characterize(st_anthro$sex)
+
+```
+
+## Zscore calculation 
+
+```{r}
+zscore <- anthro_zscores(
+  age     = st_anthro$age_in_days,
+  weight  = st_anthro$ weight,
+  lenhei  = st_anthro$height,
+  sex     = st_anthro$sex,
+  measure = NA_character_,
+  headc   = NA_real_,
+  armc    = NA_real_,
+  triskin = NA_real_,
+  subskin = NA_real_,
+  oedema  = "n"
+)
+
+## Filtering for children under 36 months and adults under 30 years of age (We assume mother )
+
+st_anthro_com <- bind_cols(st_anthro, zscore) %>%
+  select(zwei, zwfl, substance_use_adult, sex_adult, age_adult, `age_in_months`)%>%
+  filter(`age_in_months`< 36 ) %>%
+  filter(age_adult <30) 
+
+
+
+# zwei: Weight-for-age z-score
+# zwfl Weight-for-length/height z-score
+# in https://cran.r-project.org/web/packages/anthro/anthro.pdf page 12
+
+
+```
+
+
+```{r}
+
+st_anthro_com <- st_anthro_com %>%
+  filter(!is.na(zwfl)) %>%
+  mutate(wfhz_class = case_when(
+    zwfl <= -2 ~ "1",
+    zwfl > -2 & zwfl < 2 ~ "0",
+    zwfl >= 2 ~ "0"
+  ))
+
+
+st_anthro_com$wfhz_class = factor(st_anthro_com$wfhz_class, labels = c("normal", "wasting"))
+
+
+## weight for age
+
+
+st_anthro_com <- st_anthro_com %>%
+  filter(!is.na(zwei)) %>%
+  mutate(waz_class = case_when(
+    zwei <= -2 ~ "1",
+    zwei > -2 & zwei < 2 ~ "0",
+    zwei >= 2 ~ "0"
+  ))
+
+
+st_anthro_com$waz_class = factor(st_anthro_com$waz_class, labels = c("normal", "underweight"))
+```
+
+```{r}
+
+st_malnutrition <- st_anthro_com %>%
+  select(substance_use_adult, wfhz_class) %>%
+tbl_cross()
+
+st_malnutrition
+
+st_underweight <- st_anthro_com %>%
+  select(substance_use_adult, waz_class) %>%
+tbl_cross()
+
+st_underweight
+```
+
+```{r}
+under <- glm(waz_class ~ factor(substance_use_adult), family = binomial, data = st_anthro_com)
+
+tbl_regression(under, exponentiate = TRUE) |>
+  add_global_p() |>
+  bold_p(t = 0.05) |>
+  bold_labels() |>
+  italicize_labels()
+```
+
+```{r}
+freq(st_anthro_com$waz_class)
+freq(st_anthro_com$wfhz_class)
+```
+
